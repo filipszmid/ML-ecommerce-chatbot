@@ -105,7 +105,7 @@ class ProductCategoryPredictor:
             confidence = None
             if probabilities is not None:
                 probability_payload = probabilities_to_labels(
-                    probabilities[index: index + 1],
+                    probabilities[index : index + 1],
                     class_labels=self._class_labels(),
                 )
                 confidence = (
