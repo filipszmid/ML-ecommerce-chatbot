@@ -127,6 +127,9 @@ pep8:
     # ADK exposes Python function argument names to the model. These names mirror
     # the trained tabular feature schema and must stay PascalCase.
     - N803
+    # E203: whitespace before ':'. Black formatting style is in conflict with
+    # E203 on slice expressions, so E203 is disabled.
+    - E203
 
 pep8-naming:
   disable:

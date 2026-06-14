@@ -1,4 +1,4 @@
-name: ci
+name: CI
 
 on:
   push:
@@ -8,15 +8,40 @@ on:
   pull_request:
 
 jobs:
-  tests:
+  format:
     runs-on: ubuntu-latest
     env:
       POETRY_VIRTUALENVS_IN_PROJECT: "true"
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install poetry
-        run: pipx install poetry==2.4.1
+      - name: Install Poetry
+        run: |
+          pipx install poetry==2.4.1
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: poetry
+
+      - name: Install dependencies
+        run: make install-dev
+
+      - name: Check formatting
+        run: make format-check
+
+  lint:
+    runs-on: ubuntu-latest
+    env:
+      POETRY_VIRTUALENVS_IN_PROJECT: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Poetry
+        run: |
+          pipx install poetry==2.4.1
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - uses: actions/setup-python@v5
         with:
@@ -32,11 +57,28 @@ jobs:
       - name: Compile Python files
         run: poetry run python -m compileall master_config.py src interface evaluation tests
 
-      - name: Check formatting
-        run: make format-check
-
       - name: Run lint
         run: make lint
+
+  test:
+    runs-on: ubuntu-latest
+    env:
+      POETRY_VIRTUALENVS_IN_PROJECT: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Poetry
+        run: |
+          pipx install poetry==2.4.1
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: poetry
+
+      - name: Install dependencies
+        run: make install-dev
 
       - name: Run tests
         run: make tests

@@ -1,4 +1,4 @@
-name: deploy
+name: Cloud deployment
 
 on:
   workflow_dispatch:

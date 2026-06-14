@@ -1,4 +1,4 @@
-name: teardown
+name: Cloud teardown
 
 on:
   workflow_dispatch:
