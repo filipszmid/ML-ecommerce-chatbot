@@ -1,0 +1,112 @@
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      cloud:
+        description: "Cloud provider"
+        required: true
+        default: "aws"
+        type: choice
+        options:
+          - aws
+          - azure
+          - gcp
+      action:
+        description: "Terraform action"
+        required: true
+        default: "plan"
+        type: choice
+        options:
+          - plan
+          - apply
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TF_VAR_db_password: ${{ secrets.CHAT_DB_PASSWORD }}
+      TF_VAR_container_image: ${{ secrets.CONTAINER_IMAGE }}
+      TF_VAR_model_image: ${{ secrets.MODEL_IMAGE }}
+      TF_VAR_model_data_url: ${{ secrets.MODEL_DATA_URL }}
+      TF_VAR_azure_openai_api_key: ${{ secrets.AZURE_OPENAI_API_KEY }}
+      TF_VAR_azure_openai_endpoint: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+      TF_VAR_azure_ml_model_id: ${{ secrets.AZURE_ML_MODEL_ID }}
+      TF_VAR_azure_ml_environment_id: ${{ secrets.AZURE_ML_ENVIRONMENT_ID }}
+      TF_VAR_azure_ml_scoring_uri: ${{ secrets.AZURE_ML_SCORING_URI }}
+      TF_VAR_azure_ml_api_key: ${{ secrets.AZURE_ML_API_KEY }}
+      TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+      TF_VAR_model_artifact_uri: ${{ secrets.GCP_MODEL_ARTIFACT_URI }}
+      TF_VAR_model_serving_image: ${{ secrets.GCP_MODEL_SERVING_IMAGE }}
+      TF_VAR_clearml_enabled: ${{ vars.CLEARML_ENABLED || 'false' }}
+      TF_VAR_clearml_api_host: ${{ vars.CLEARML_API_HOST || '' }}
+      TF_VAR_clearml_web_host: ${{ vars.CLEARML_WEB_HOST || '' }}
+      TF_VAR_clearml_files_host: ${{ vars.CLEARML_FILES_HOST || '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Configure AWS credentials
+        if: inputs.cloud == 'aws'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ vars.AWS_REGION || 'eu-central-1' }}
+
+      - name: Azure login
+        if: inputs.cloud == 'azure'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: GCP auth
+        if: inputs.cloud == 'gcp'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Validate required Terraform secrets
+        run: |
+          set -euo pipefail
+          case "${{ inputs.cloud }}" in
+            aws)
+              required=(TF_VAR_db_password TF_VAR_container_image TF_VAR_model_image TF_VAR_model_data_url)
+              ;;
+            azure)
+              required=(TF_VAR_db_password TF_VAR_container_image TF_VAR_azure_openai_api_key TF_VAR_azure_openai_endpoint TF_VAR_azure_ml_model_id TF_VAR_azure_ml_environment_id TF_VAR_azure_ml_scoring_uri)
+              ;;
+            gcp)
+              required=(TF_VAR_db_password TF_VAR_project_id TF_VAR_container_image TF_VAR_model_artifact_uri TF_VAR_model_serving_image)
+              ;;
+          esac
+
+          missing=0
+          for name in "${required[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error title=Missing secret::${name} is empty."
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Terraform init
+        run: terraform -chdir=infra/${{ inputs.cloud }} init
+
+      - name: Terraform plan
+        if: inputs.action == 'plan'
+        run: terraform -chdir=infra/${{ inputs.cloud }} plan
+
+      - name: Terraform apply
+        if: inputs.action == 'apply'
+        run: terraform -chdir=infra/${{ inputs.cloud }} apply -auto-approve

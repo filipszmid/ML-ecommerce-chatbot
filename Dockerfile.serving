@@ -1,0 +1,27 @@
+FROM python:3.14-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    POETRY_VERSION=2.4.1 \
+    POETRY_VIRTUALENVS_CREATE=false \
+    PYTHONPATH=/app/src:/app
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential curl liblz4-dev \
+    && pip install --no-cache-dir "poetry==${POETRY_VERSION}" \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml poetry.lock ./
+RUN poetry install --only serving --no-root --no-interaction --no-ansi \
+    && pip install --no-cache-dir kafka-python-ng lz4
+
+COPY infra/clearml/serving_preprocess.py ./infra/clearml/serving_preprocess.py
+COPY infra/clearml/llm_serving_preprocess.py ./infra/clearml/llm_serving_preprocess.py
+COPY infra/clearml/serving_entrypoint.sh /usr/local/bin/clearml-serving-entrypoint
+RUN chmod +x /usr/local/bin/clearml-serving-entrypoint
+
+EXPOSE 8082
+
+CMD ["clearml-serving-entrypoint", "inference"]

@@ -1,0 +1,114 @@
+[project]
+name = "ml-ecommerce-chatbot"
+version = "0.1.0"
+description = "Google ADK chatbot connected to a tracked classical ML product-category pipeline."
+authors = [
+    {name = "filipsz",email = "filip.szmid@gmail.com"}
+]
+requires-python = ">=3.14,<3.15"
+dependencies = [
+]
+keywords = ["mlops", "clearml", "fastapi", "google-adk", "tabular-ml"]
+license = "MIT"
+
+[project.scripts]
+ml-ecommerce-chatbot = "interface.cli.app:main"
+train-model = "interface.cli.app:train_entrypoint"
+select-model = "interface.cli.app:select_model_entrypoint"
+finetune = "interface.cli.app:finetune_entrypoint"
+evaluate = "interface.cli.app:evaluate_entrypoint"
+evaluate-selection = "interface.cli.app:evaluate_selection_entrypoint"
+predict = "interface.cli.app:predict_entrypoint"
+register-llm-adapter = "interface.cli.app:register_llm_adapter_entrypoint"
+cloud-train = "interface.cli.app:cloud_train_entrypoint"
+clean-clearml = "interface.cli.app:clean_clearml_entrypoint"
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+packages = [
+    { include = "src" },
+    { include = "interface" },
+    { include = "evaluation" },
+]
+
+[tool.pytest.ini_options]
+pythonpath = [".", "src"]
+markers = [
+    "docker: validates Docker Compose configuration when the Docker CLI is available",
+]
+
+[dependency-groups]
+dev = [
+    "clearml (>=2.1.7,<3.0.0)",
+    "prospector (>=1.17.3,<2.0.0)",
+    "pytest (>=9.0.1,<10.0.0)",
+    "black (>=26.1.0,<27.0.0)",
+    "shap (>=0.52.0,<0.53.0)",
+    "clearml-serving (>=1.3.5,<2.0.0)"
+]
+api = [
+    "fastapi (>=0.136.3,<0.137.0)",
+    "uvicorn (>=0.48.0,<0.49.0)",
+    "pandas (>=2.2,<3.0)",
+    "scikit-learn (>=1.8.0,<2.0.0)",
+    "xgboost (>=3.2.0,<4.0.0)",
+    "catboost (>=1.2.10,<2.0.0)",
+    "imbalanced-learn (>=0.14.1,<0.15.0)"
+]
+serving = [
+    "clearml-serving (>=1.3.5,<2.0.0)",
+    "fastapi (>=0.136.3,<0.137.0)",
+    "uvicorn (>=0.48.0,<0.49.0)",
+    "grpcio (>=1.80.0,<2.0.0)",
+    "prometheus-client (>=0.25.0,<0.26.0)",
+    "pandas (>=2.2,<3.0)",
+    "scikit-learn (>=1.8.0,<2.0.0)",
+    "xgboost (>=3.2.0,<4.0.0)",
+    "catboost (>=1.2.10,<2.0.0)",
+    "imbalanced-learn (>=0.14.1,<0.15.0)"
+]
+app = [
+    "pandas (>=2.2,<3.0)",
+    "fastapi (>=0.136.3,<0.137.0)",
+    "xgboost (>=3.2.0,<4.0.0)",
+    "torch (>=2.12.0,<3.0.0)",
+    "sagemaker (>=3.12.0,<4.0.0)",
+    "google-cloud-aiplatform (>=1.154.0,<2.0.0)",
+    "jupyter (>=1.1.1,<2.0.0)",
+    "scikit-learn (>=1.8.0,<2.0.0)",
+    "loguru (>=0.7.3,<0.8.0)",
+    "hyperopt (>=0.2.7,<0.3.0)",
+    "boto3 (>=1.43.18,<2.0.0)",
+    "azure-ai-ml (>=1.33.0,<2.0.0)",
+    "azure-identity (>=1.25.3,<2.0.0)",
+    "catboost (>=1.2.10,<2.0.0)",
+    "imbalanced-learn (>=0.14.1,<0.15.0)",
+    "sqlalchemy (>=2.0.50,<3.0.0)",
+    "psycopg[binary] (>=3.2.13,<4.0.0)",
+    "google-adk (>=1.21.0,<2.0.0)",
+    "litellm (>=1.80.0,<2.0.0)",
+    "asyncpg (>=0.31.0,<0.32.0)"
+]
+chat = [
+    "google-adk (>=1.21.0,<2.0.0)",
+    "litellm (>=1.80.0,<2.0.0)",
+    "asyncpg (>=0.31.0,<0.32.0)",
+    "pydantic (>=2.9.0,<3.0.0)",
+    "psycopg[binary] (>=3.2.13,<4.0.0)"
+]
+llm-train = [
+    "transformers (>=4.57,<5)",
+    "peft (>=0.19,<0.20)",
+    "trl (>=0.25,<0.26)",
+    "datasets (>=2.21,<5)",
+    "bitsandbytes (>=0.44,<0.50)"
+]
+
+[[tool.poetry.source]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+priority = "supplemental"

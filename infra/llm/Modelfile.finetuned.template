@@ -1,0 +1,8 @@
+FROM {{BASE_MODEL}}
+# The adapter path must be an absolute or relative path to the safetensors file or directory
+ADAPTER {{ADAPTER_PATH}}
+
+# Adjust template if needed depending on base model
+# TEMPLATE """<|user|>
+# {{ .Prompt }}<|model|>
+# """

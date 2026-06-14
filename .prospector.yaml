@@ -1,0 +1,137 @@
+strictness: veryhigh
+test-warnings: true
+doc-warnings: true
+member-warnings: true
+max-line-length: 88
+# The project does not use Django. Prospector autodetection was enabling
+# pylint-django from the environment and producing a false django-not-available
+# failure, so library autodetection is kept off explicitly.
+autodetect: false
+
+ignore-paths:
+  - data
+  - .venv
+  - infra
+
+pylint:
+  disable:
+    # ── Click / ClearML PipelineDecorator framework constraints ──
+    # Click commands require one function parameter per CLI option — grouping
+    # them into a dataclass would break the @click.option decorator contract.
+    # ClearML @PipelineDecorator.component functions must expose each parameter
+    # explicitly so the pipeline UI can render and serialize them.
+    # LLMProvider.finetune() is a stable interface implemented by 4 providers;
+    # changing the signature would break every subclass and all callers.
+    # Affected: interface/cli/*, src/models/clearml_pipeline.py,
+    #   src/finetuning/clearml_pipeline.py, src/providers/*.py,
+    #   src/models/common/base.py, src/models/common/artifacts.py
+    - too-many-arguments
+    - too-many-positional-arguments
+
+    # ── ML training orchestration complexity ──
+    # Training workflows (BaseTrainWorkflow.run, LLMFineTuner.train,
+    # _finalize_model_selection, clean_clearml) are orchestration entry points
+    # that coordinate data loading, model fitting, artifact saving, ClearML
+    # logging, and reporting in a single transaction. Splitting them further
+    # would scatter the pipeline logic across many tiny helpers without
+    # improving readability.
+    - too-many-locals
+    - too-many-statements
+    - too-many-branches
+
+    # ── ML config / tracker dataclasses ──
+    # LLMFineTuner holds 17 training hyperparameters + tracker state.
+    # ClearMLTracker holds 7 config fields + 3 runtime fields.
+    # TrainingResult is a frozen dataclass with 8 result fields.
+    # These are cohesive configuration objects, not god-classes.
+    - too-many-instance-attributes
+
+    # ── Dataclass containers and test mock classes ──
+    # CatBoostTrainWorkflow, ModelSelectionWorkflow, test FakeProvider /
+    # FakeTrainingWorkflow classes are intentionally single-purpose.
+    - too-few-public-methods
+
+    # ── ClearML SDK resilience boundary ──
+    # ClearML is an external SDK that can fail for transport, auth, server
+    # version, or credential reasons. Every tracker method catches Exception
+    # broadly, logs a warning, and disables further tracking so the ML
+    # pipeline completes even when the tracking server is unreachable.
+    # The same pattern applies to clean_clearml (operational cleanup) and
+    # SHAP generation (optional explainability).
+    - broad-exception-caught
+
+    # ── Lazy imports for optional heavy dependencies ──
+    # Cloud SDKs (boto3, sagemaker, vertexai, azure.ai.ml) and training
+    # libraries (transformers, peft, trl) are optional. Importing them at
+    # module level would crash normal chat/API startup when they are not
+    # installed. ClearML pipeline components import inside the function body
+    # because they execute in a remote agent with a different sys.path.
+    # Test files import inside test bodies so monkeypatching and environment
+    # setup happen before module initialization.
+    - import-outside-toplevel
+
+    # ── Dataset schema naming contract ──
+    # CustomerFeatures field names (Age, Gender, AnnualIncome, …) must match
+    # the source CSV column names, the API request/response schema, and the
+    # trained model feature order. Renaming to snake_case would break
+    # inference. ADK module-level constants (root_agent, SafeLiteLlm) follow
+    # the Google ADK framework naming convention.
+    - invalid-name
+
+    # ── ClearML SDK internal access ──
+    # clean_clearml uses Task._get_default_session() because the ClearML SDK
+    # provides no public API for low-level project/task batch deletion.
+    # Tests access tracker._logger to verify internal ClearML logging state.
+    - protected-access
+
+    # ── ADK LiteLLM wrapper ──
+    # SafeLiteLlm intentionally does not override BaseLlm.connect() because
+    # ADK never calls it — only the serializer is customized for safe
+    # agent inspection.
+    - abstract-method
+
+    # ── Test monkeypatching import style ──
+    # Tests use `import module` instead of `from module import name` so
+    # monkeypatch.setattr can replace attributes on the live module object.
+    - consider-using-from-import
+
+    # ── Try/except import grouping ──
+    # google.adk imports live inside a try/except block and cannot be grouped
+    # with the top-level google.* imports.
+    - ungrouped-imports
+
+    # ── Optional cloud SDK stubs ──
+    # sagemaker is not installed in the local dev environment. The AWSRunner
+    # only imports it inside the run() method behind a dry_run guard.
+    - import-error
+    - no-member
+    - no-name-in-module
+
+pydocstyle:
+  disable:
+    # Prospector's pydocstyle runner cannot select the Google convention.
+    # This project intentionally uses Google-style docstrings (`Args:`,
+    # `Returns:`, `Raises:`) and standard class docstring placement, so only
+    # convention-conflicting codes are disabled while missing-docstring and
+    # meaningful blank-line checks stay active.
+    - D203
+    - D213
+    - D406
+    - D407
+    - D413
+
+pep8:
+  disable:
+    # pep8-naming / pycodestyle warnings
+    # N803: argument name should be lowercase.
+    # ADK exposes Python function argument names to the model. These names mirror
+    # the trained tabular feature schema and must stay PascalCase.
+    - N803
+
+pep8-naming:
+  disable:
+    - N803
+
+mccabe:
+  disable:
+    - MC0001

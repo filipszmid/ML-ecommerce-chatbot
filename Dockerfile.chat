@@ -1,0 +1,26 @@
+FROM python:3.14-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    POETRY_VERSION=2.4.1 \
+    POETRY_VIRTUALENVS_CREATE=false
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential curl \
+    && pip install --no-cache-dir "poetry==${POETRY_VERSION}" \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml poetry.lock ./
+# Only install the lightweight chat dependencies
+RUN poetry install --only chat --no-root --no-interaction --no-ansi
+
+# Only copy chat code plus shared config; keep it decoupled from src/ models.
+COPY master_config.py ./
+COPY interface/chat/ ./interface/chat/
+
+EXPOSE 8001
+
+CMD ["adk", "web", "interface/chat", "--host", "0.0.0.0", "--port", "8001"]

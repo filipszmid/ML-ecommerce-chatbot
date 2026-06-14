@@ -1,0 +1,360 @@
+services:
+  api:
+    build:
+      context: .
+    image: ml-ecommerce-chatbot-api:local
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      DATABASE_URL: postgresql+psycopg://ml_chatbot:${POSTGRES_PASSWORD:-ml_chatbot}@postgres:5432/ml_ecommerce_chatbot
+      MODEL_ARTIFACT_DIR: /app/data/runs/classical_ml
+      OLLAMA_BASE_URL: http://ollama:11434
+      CLEARML_ENABLED: "true"
+      CLEARML_API_HOST: http://clearml-apiserver:8008
+      CLEARML_WEB_HOST: http://localhost:8080
+      CLEARML_FILES_HOST: http://clearml-fileserver:8081
+      CLEARML_API_ACCESS_KEY: ${CLEARML_API_ACCESS_KEY:-}
+      CLEARML_API_SECRET_KEY: ${CLEARML_API_SECRET_KEY:-}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+      clearml-apiserver:
+        condition: service_healthy
+      clearml-fileserver:
+        condition: service_started
+    networks:
+      - default
+      - clearml
+
+  chat:
+    build:
+      context: .
+      dockerfile: Dockerfile.chat
+    image: ml-ecommerce-chatbot-chat:local
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      API_URL: http://api:8000
+      DATABASE_URL: postgresql+psycopg://ml_chatbot:${POSTGRES_PASSWORD:-ml_chatbot}@postgres:5432/ml_ecommerce_chatbot
+      OLLAMA_BASE_URL: http://ollama:11434
+    ports:
+      - "8001:8001"
+    depends_on:
+      - api
+      - postgres
+      - ollama
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ml_chatbot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ml_chatbot}
+      POSTGRES_DB: ml_ecommerce_chatbot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ml_chatbot -d ml_ecommerce_chatbot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "${OLLAMA_HOST_PORT:-11434}:11434"
+    volumes:
+      - ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  ollama-pull:
+    image: ollama/ollama:latest
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["ollama pull \"${OLLAMA_MODEL:-llama3.1:8b}\""]
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+  clearml-elastic:
+    image: elasticsearch:8.19.9
+    restart: unless-stopped
+    environment:
+      bootstrap.memory_lock: "true"
+      cluster.name: clearml
+      cluster.routing.allocation.node_initial_primaries_recoveries: "500"
+      cluster.routing.allocation.disk.watermark.low: 500mb
+      cluster.routing.allocation.disk.watermark.high: 500mb
+      cluster.routing.allocation.disk.watermark.flood_stage: 500mb
+      discovery.type: "single-node"
+      http.compression_level: "7"
+      node.name: clearml
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - clearml-elastic:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsSL http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+    networks:
+      clearml:
+        aliases:
+          - elasticsearch
+
+  clearml-mongo:
+    image: mongo:8.0.15
+    restart: unless-stopped
+    command: --setParameter internalQueryMaxBlockingSortMemoryUsageBytes=196100200
+    volumes:
+      - clearml-mongo-db:/data/db
+      - clearml-mongo-configdb:/data/configdb
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      clearml:
+        aliases:
+          - mongo
+
+  clearml-redis:
+    image: redis:7.4
+    restart: unless-stopped
+    volumes:
+      - clearml-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      clearml:
+        aliases:
+          - redis
+
+  clearml-fileserver:
+    image: clearml/server:latest
+    command: [fileserver]
+    restart: unless-stopped
+    depends_on:
+      clearml-apiserver:
+        condition: service_healthy
+    volumes:
+      - clearml-fileserver:/mnt/fileserver
+      - clearml-config:/opt/clearml/config
+      - clearml-logs:/var/log/clearml
+    environment:
+      CLEARML__fileserver__delete__allow_batch: "true"
+    ports:
+      - "8081:8081"
+    networks:
+      clearml:
+        aliases:
+          - fileserver
+
+  clearml-apiserver:
+    image: clearml/server:latest
+    command: [apiserver]
+    restart: unless-stopped
+    depends_on:
+      clearml-elastic:
+        condition: service_healthy
+      clearml-mongo:
+        condition: service_healthy
+      clearml-redis:
+        condition: service_healthy
+    environment:
+      CLEARML_ELASTIC_SERVICE_HOST: clearml-elastic
+      CLEARML_ELASTIC_SERVICE_PORT: 9200
+      CLEARML_MONGODB_SERVICE_HOST: clearml-mongo
+      CLEARML_MONGODB_SERVICE_PORT: 27017
+      CLEARML_REDIS_SERVICE_HOST: clearml-redis
+      CLEARML_REDIS_SERVICE_PORT: 6379
+      CLEARML_SERVER_DEPLOYMENT_TYPE: linux
+      CLEARML__secure__credentials__apiserver__user_key: ${CLEARML_API_ACCESS_KEY:-ml-ecommerce-local}
+      CLEARML__secure__credentials__apiserver__user_secret: ${CLEARML_API_SECRET_KEY:-ml-ecommerce-local-secret}
+      CLEARML__apiserver__pre_populate__enabled: "true"
+      CLEARML__apiserver__pre_populate__zip_files: "/opt/clearml/db-pre-populate"
+      CLEARML__apiserver__pre_populate__artifacts_path: "/mnt/fileserver"
+    volumes:
+      - clearml-fileserver:/mnt/fileserver
+      - clearml-config:/opt/clearml/config
+      - clearml-logs:/var/log/clearml
+    ports:
+      - "8008:8008"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsSL http://localhost:8008/debug.ping || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+    networks:
+      clearml:
+        aliases:
+          - apiserver
+
+  clearml-webserver:
+    image: clearml/server:latest
+    command: [webserver]
+    restart: unless-stopped
+    depends_on:
+      clearml-apiserver:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+    networks:
+      clearml:
+        aliases:
+          - webserver
+
+  clearml-serving-zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - serving
+
+  clearml-serving-kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    restart: unless-stopped
+    depends_on:
+      - clearml-serving-zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: clearml-serving-zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://clearml-serving-kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    networks:
+      - serving
+
+  clearml-serving-inference:
+    build:
+      context: .
+      dockerfile: Dockerfile.serving
+    image: ml-ecommerce-chatbot-clearml-serving:local
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+      - path: data/clearml/serving.env
+        required: false
+    environment:
+      CLEARML_API_HOST: http://clearml-apiserver:8008
+      CLEARML_WEB_HOST: http://clearml-webserver
+      CLEARML_FILES_HOST: http://clearml-fileserver:8081
+      CLEARML_API_ACCESS_KEY: ${CLEARML_API_ACCESS_KEY:-ml-ecommerce-local}
+      CLEARML_API_SECRET_KEY: ${CLEARML_API_SECRET_KEY:-ml-ecommerce-local-secret}
+      CLEARML_DEFAULT_KAFKA_SERVE_URL: clearml-serving-kafka:9092
+      CLEARML_SERVING_SERVICE_NAME: ${CLEARML_SERVING_SERVICE_NAME:-ml-ecommerce-chatbot-serving}
+      CLEARML_SERVING_PROJECT: ${CLEARML_SERVING_PROJECT:-ML Ecommerce Chatbot/Serving}
+      CLEARML_SERVING_ENDPOINT: ${CLEARML_SERVING_ENDPOINT:-product-category}
+      CLEARML_SERVING_TASK_FILE: /app/data/clearml/serving_task_id
+      CLEARML_SERVING_ENV_FILE: /app/data/clearml/serving.env
+      CLEARML_SERVING_BASE_URL: ${CLEARML_SERVING_BASE_URL:-http://localhost:8082/serve}
+      CLEARML_SERVING_KAFKA_METRIC_SERVER: ${CLEARML_SERVING_KAFKA_METRIC_SERVER:-clearml-serving-kafka:9092}
+      CLEARML_SERVING_METRIC_LOG_FREQ: ${CLEARML_SERVING_METRIC_LOG_FREQ:-1.0}
+      CLEARML_SERVING_POLL_FREQ: 0.1
+      CLEARML_SERVING_PORT: 8082
+      OLLAMA_BASE_URL: http://ollama:11434
+      CLEARML_LLM_OLLAMA_MODEL: ${CLEARML_LLM_OLLAMA_MODEL:-}
+      CLEARML__network__host_translation__0__from: "http://localhost:8081"
+      CLEARML__network__host_translation__0__to: "http://clearml-fileserver:8081"
+    ports:
+      - "8082:8082"
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      clearml-apiserver:
+        condition: service_healthy
+      clearml-fileserver:
+        condition: service_started
+      clearml-serving-kafka:
+        condition: service_started
+    networks:
+      - default
+      - clearml
+      - serving
+
+  clearml-serving-statistics:
+    image: ml-ecommerce-chatbot-clearml-serving:local
+    restart: unless-stopped
+    command: ["clearml-serving-entrypoint", "statistics"]
+    env_file:
+      - path: .env
+        required: false
+      - path: data/clearml/serving.env
+        required: false
+    environment:
+      CLEARML_API_HOST: http://clearml-apiserver:8008
+      CLEARML_WEB_HOST: http://clearml-webserver
+      CLEARML_FILES_HOST: http://clearml-fileserver:8081
+      CLEARML_API_ACCESS_KEY: ${CLEARML_API_ACCESS_KEY:-ml-ecommerce-local}
+      CLEARML_API_SECRET_KEY: ${CLEARML_API_SECRET_KEY:-ml-ecommerce-local-secret}
+      CLEARML_DEFAULT_KAFKA_SERVE_URL: clearml-serving-kafka:9092
+      CLEARML_SERVING_SERVICE_NAME: ${CLEARML_SERVING_SERVICE_NAME:-ml-ecommerce-chatbot-serving}
+      CLEARML_SERVING_PROJECT: ${CLEARML_SERVING_PROJECT:-ML Ecommerce Chatbot/Serving}
+      CLEARML_SERVING_ENDPOINT: ${CLEARML_SERVING_ENDPOINT:-product-category}
+      CLEARML_SERVING_TASK_FILE: /app/data/clearml/serving_task_id
+      CLEARML_SERVING_ENV_FILE: /app/data/clearml/serving.env
+      CLEARML_SERVING_BASE_URL: ${CLEARML_SERVING_BASE_URL:-http://localhost:8082/serve}
+      CLEARML_SERVING_KAFKA_METRIC_SERVER: ${CLEARML_SERVING_KAFKA_METRIC_SERVER:-clearml-serving-kafka:9092}
+      CLEARML_SERVING_METRIC_LOG_FREQ: ${CLEARML_SERVING_METRIC_LOG_FREQ:-1.0}
+      CLEARML_SERVING_POLL_FREQ: 0.1
+      CLEARML_SERVING_PORT: 9999
+      CLEARML__network__host_translation__0__from: "http://localhost:8081"
+      CLEARML__network__host_translation__0__to: "http://clearml-fileserver:8081"
+    ports:
+      - "9999:9999"
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - clearml-serving-inference
+    networks:
+      - clearml
+      - serving
+
+volumes:
+  postgres-data:
+  ollama:
+  clearml-elastic:
+  clearml-mongo-db:
+  clearml-mongo-configdb:
+  clearml-redis:
+  clearml-fileserver:
+  clearml-config:
+  clearml-logs:
+
+networks:
+  default:
+    driver: bridge
+  clearml:
+    driver: bridge
+  serving:
+    driver: bridge
